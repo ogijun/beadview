@@ -18,7 +18,8 @@ class BdTest < Minitest::Test
     runner, calls = recording_runner(stdout: "[]")
     Beadview::Bd.new(runner: runner).ready("/r")
 
-    assert_equal [["bd", "-C", "/r", "--readonly", "ready", "--json"]], calls
+    # 既定の --limit は 100 で、超えると黙って切られる
+    assert_equal [["bd", "-C", "/r", "--readonly", "ready", "--json", "--limit", "0"]], calls
   end
 
   def test_history_parses_array

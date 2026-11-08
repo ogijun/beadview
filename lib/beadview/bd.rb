@@ -22,7 +22,7 @@ module Beadview
     end
 
     def ready(repo_path)
-      json(repo_path, "ready", "--json")
+      json(repo_path, "ready", "--json", "--limit", "0")
     end
 
     def history(repo_path, id)
