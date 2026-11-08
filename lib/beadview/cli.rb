@@ -6,7 +6,7 @@ module Beadview
   module CLI
     BANNER = "beadview — beads の作業状況を一画面で見る（読み取り専用）"
     # リポジトリ1つが読めなくても、ほかの表示は止めない
-    REPO_ERRORS = [BdError, JSON::ParserError, SystemCallError].freeze
+    REPO_ERRORS = [BdError, JSON::ParserError, SystemCallError, ArgumentError].freeze
 
     module_function
 

@@ -83,6 +83,30 @@ class CLITest < Minitest::Test
     assert_includes out, "a: database is locked"
   end
 
+  def test_malformed_time_in_one_repo_does_not_crash
+    bad = fixture_json("list_all.json").map { _1["id"] == "tw-2" ? _1.merge("closed_at" => "not-a-time") : _1 }
+    bd = fake_bd
+    bd.define_singleton_method(:list_all) { |path| File.basename(path) == "a" ? bad : super(path) }
+    code, out = run_cli(bd: bd)
+
+    assert_equal 0, code
+    assert_match(/^a: /, out)
+    assert_match(/^b\s+tw-1/, out)
+  end
+
+  def test_unwritable_cache_still_shows_since
+    Dir.mktmpdir do |dir|
+      blocker = File.join(dir, "file")
+      File.write(blocker, "")
+      out = StringIO.new
+      Beadview::CLI.run([], bd: fake_bd, repo_paths: @paths, cache: Beadview::HistoryCache.new(dir: File.join(blocker, "sub")),
+                            now: NOW, out: out)
+
+      refute_includes out.string, "読み込めなかったリポジトリ"
+      assert_includes out.string, "日前から"
+    end
+  end
+
   def test_all_failing_returns_1
     code, = run_cli(bd: fake_bd(failing: %w[a b]))
 

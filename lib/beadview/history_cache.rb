@@ -42,15 +42,18 @@ module Beadview
     def load(path)
       data = JSON.parse(File.read(path))
       data.is_a?(Hash) ? data : {}
-    rescue Errno::ENOENT, JSON::ParserError
+    rescue SystemCallError, JSON::ParserError
       {}
     end
 
+    # 書けなくても表示は続ける（次回また bd history を読むだけ）
     def save(path, entries)
       FileUtils.mkdir_p(@dir)
       tmp = "#{path}.#{Process.pid}.#{Thread.current.object_id}.tmp"
       File.write(tmp, JSON.generate(entries))
       File.rename(tmp, path)
+    rescue SystemCallError
+      nil
     end
 
     def parse(value)
