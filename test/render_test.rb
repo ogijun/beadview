@@ -25,6 +25,14 @@ class RenderTest < Minitest::Test
     assert_equal 5, Beadview::Render.width("資料a")
   end
 
+  # 実データで列がずれた文字。・ー は Katakana ではなく Common に属する
+  def test_width_of_common_cjk_marks_and_halfwidth_kana
+    assert_equal 4, Beadview::Render.width("・ー")
+    assert_equal 6, Beadview::Render.width("（、）")
+    assert_equal 2, Beadview::Render.width("ｶﾅ")
+    assert_equal 2, Beadview::Render.width("한")
+  end
+
   def test_ago_buckets
     assert_equal "たった今から", Beadview::Render.ago(NOW - 30, NOW)
     assert_equal "15分前から", Beadview::Render.ago(NOW - (15 * 60), NOW)

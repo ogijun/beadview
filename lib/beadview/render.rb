@@ -5,7 +5,8 @@ require "time"
 
 module Beadview
   module Render
-    WIDE = /\p{Han}|\p{Hiragana}|\p{Katakana}|[　-〿＀-￯]/
+    # East Asian Width が W/F の主な範囲。文字種（script）で見ると ・ ー が漏れ、半角カナが入ってしまう
+    WIDE = /[\u{1100}-\u{115F}\u{2E80}-\u{303E}\u{3041}-\u{33FF}\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{A960}-\u{A97F}\u{AC00}-\u{D7A3}\u{F900}-\u{FAFF}\u{FE30}-\u{FE4F}\u{FF00}-\u{FF60}\u{FFE0}-\u{FFE6}\u{1F300}-\u{1F64F}\u{1F900}-\u{1F9FF}\u{20000}-\u{3FFFD}]/
     HEADING_WIDTH = 50
     TITLE_WIDTH = 30
     REASON_WIDTH = 80
