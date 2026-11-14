@@ -121,6 +121,20 @@ class CLITest < Minitest::Test
     assert_equal %w[tw-1 tw-1 tw-3 tw-3], ids
   end
 
+  # bd 1.3 からは started_at が入る。あれば history を読まずにそれを使う
+  def test_started_at_is_used_without_history
+    started = "2026-11-06T01:00:00Z"
+    list = fixture_json("list_all.json").map { _1["id"] == "tw-1" ? _1.merge("started_at" => started) : _1 }
+    bd = fake_bd
+    bd.define_singleton_method(:list_all) { |_path| list }
+    _, out = run_cli(["--json", "--repo", "a"], bd: bd)
+    working = JSON.parse(out)["repos"][0]["working"].to_h { [_1["id"], _1["since"]] }
+    ids = Array.new(bd.history_calls.size) { bd.history_calls.pop }.map(&:last)
+
+    assert_equal Time.iso8601(started).iso8601, working["tw-1"]
+    assert_equal %w[tw-3], ids
+  end
+
   def test_repo_filter
     _, out = run_cli(["--repo", "b"])
 

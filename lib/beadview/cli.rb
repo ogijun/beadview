@@ -30,15 +30,21 @@ module Beadview
     def view_for(repo, bd:, cache:, now:, days:)
       issues = bd.list_all(repo.path)
       since_by_id = issues.select { _1["status"] == "in_progress" }.to_h do |issue|
-        since = cache.since(repo_path: repo.path, id: issue["id"], updated_at: issue["updated_at"]) do
-          Timeline.in_progress_since(entries: bd.history(repo.path, issue["id"]))
-        end
-        [issue["id"], since]
+        [issue["id"], since_for(issue, repo: repo, bd: bd, cache: cache)]
       end
       Snapshot.build(repo: repo, issues: issues, ready: bd.ready(repo.path), since_by_id: since_by_id,
                      closers: Timeline.closers(events: bd.events(repo.path)), now: now, days: days)
     rescue *REPO_ERRORS => e
       Snapshot.failed(repo: repo, message: e.message.lines.first.to_s.strip)
+    end
+
+    # bd 1.3 以降は started_at を持つ。それより前に着手した bead だけ bd history から割り出す
+    def since_for(issue, repo:, bd:, cache:)
+      return Time.iso8601(issue["started_at"]) if issue["started_at"]
+
+      cache.since(repo_path: repo.path, id: issue["id"], updated_at: issue["updated_at"]) do
+        Timeline.in_progress_since(entries: bd.history(repo.path, issue["id"]))
+      end
     end
 
     def parse(argv)
