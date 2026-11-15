@@ -3,6 +3,9 @@
 module Beadview
   Repo = Data.define(:name, :path)
 
+  # 利用者が直せる誤り。スタックトレースではなく一行で伝える
+  class UsageError < StandardError; end
+
   module Repos
     module_function
 
@@ -17,7 +20,11 @@ module Beadview
     end
 
     def ghq_paths(runner:)
-      stdout, _stderr, ok = runner.call(["ghq", "list", "-p"])
+      stdout, _stderr, ok = begin
+        runner.call(["ghq", "list", "-p"])
+      rescue Errno::ENOENT
+        raise UsageError, "ghq が見つかりません（beads を持つリポジトリを ghq list -p で探します）"
+      end
       return [] unless ok
 
       stdout.lines.map(&:strip).reject(&:empty?)

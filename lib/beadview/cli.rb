@@ -10,21 +10,30 @@ module Beadview
 
     module_function
 
-    def run(argv, bd: Bd.new, repo_paths: nil, cache: HistoryCache.new, now: Time.now, out: $stdout)
+    def run(argv, bd: Bd.new, repo_paths: nil, runner: Bd::DEFAULT_RUNNER, cache: HistoryCache.new, now: Time.now, out: $stdout)
       opts = parse(argv)
       return usage(out, opts[:help]) if opts[:help]
 
       cache = HistoryCache::NONE if opts[:no_cache]
-      paths = repo_paths || Repos.ghq_paths(runner: Bd::DEFAULT_RUNNER)
-      repos = Repos.from_paths(paths: paths)
-      repos = repos.select { opts[:repos].include?(_1.name) } if opts[:repos].any?
+      paths = repo_paths || Repos.ghq_paths(runner: runner)
+      repos = select_repos(Repos.from_paths(paths: paths), opts[:repos])
 
       views = repos.map { |repo| Thread.new { view_for(repo, bd: bd, cache: cache, now: now, days: opts[:days]) } }.map(&:value)
       out.write(opts[:json] ? Render.json(views: views, now: now, days: opts[:days]) + "\n" : Render.text(views: views, now: now, days: opts[:days]))
       views.any? && views.all?(&:error) ? 1 : 0
-    rescue OptionParser::ParseError => e
+    rescue OptionParser::ParseError, UsageError => e
       out.puts e.message
       2
+    end
+
+    # 打ち間違いを「（なし）」で黙って通さない
+    def select_repos(repos, names)
+      return repos if names.empty?
+
+      unknown = names - repos.map(&:name)
+      raise UsageError, "知らないリポジトリ: #{unknown.join(", ")}（候補: #{repos.map(&:name).join(", ")}）" if unknown.any?
+
+      repos.select { names.include?(_1.name) }
     end
 
     def view_for(repo, bd:, cache:, now:, days:)

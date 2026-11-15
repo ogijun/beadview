@@ -143,6 +143,25 @@ class CLITest < Minitest::Test
     refute_includes out, "a 2件"
   end
 
+  def test_unknown_repo_name_is_an_error
+    code, out = run_cli(["--repo", "b", "--repo", "nope"])
+
+    assert_equal 2, code
+    assert_includes out, "nope"
+    assert_includes out, "a, b"
+    refute_includes out, "── 着手中"
+  end
+
+  def test_missing_ghq_is_reported_without_backtrace
+    missing = ->(_argv) { raise Errno::ENOENT, "ghq" }
+    out = StringIO.new
+    code = Beadview::CLI.run([], bd: fake_bd, runner: missing, cache: Beadview::HistoryCache::NONE, now: NOW, out: out)
+
+    assert_equal 2, code
+    assert_includes out.string, "ghq"
+    refute_includes out.string, "Errno"
+  end
+
   def test_json_flag
     _, out = run_cli(["--json", "--days", "5"])
     data = JSON.parse(out)
