@@ -47,10 +47,8 @@ module Beadview
       Snapshot.failed(repo: repo, message: e.message.lines.first.to_s.strip)
     end
 
-    # bd 1.3 以降は started_at を持つ。それより前に着手した bead だけ bd history から割り出す
+    # started_at は使わない。最初の着手時刻のまま残り、戻してから再着手しても更新されないため
     def since_for(issue, repo:, bd:, cache:)
-      return Time.iso8601(issue["started_at"]) if issue["started_at"]
-
       cache.since(repo_path: repo.path, id: issue["id"], updated_at: issue["updated_at"]) do
         Timeline.in_progress_since(entries: bd.history(repo.path, issue["id"]))
       end
