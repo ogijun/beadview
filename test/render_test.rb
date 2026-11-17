@@ -7,16 +7,17 @@ class RenderTest < Minitest::Test
   TW = Beadview::Repo.new(name: "team_wiki", path: "/r/team_wiki")
   RA = Beadview::Repo.new(name: "reserve_app", path: "/r/reserve_app")
 
-  def view(repo: TW, working: [], closed: [], ready_count: 0, error: nil)
-    Beadview::RepoView.new(repo: repo, working: working, closed: closed, ready_count: ready_count, error: error)
+  def view(repo: TW, working: [], closed: [], awaiting: [], ready_count: 0, error: nil, pr_error: nil)
+    Beadview::RepoView.new(repo: repo, working: working, closed: closed, awaiting: awaiting, ready_count: ready_count,
+                           error: error, pr_error: pr_error)
   end
 
-  def working(id, title: "t", assignee: "a-claude", since: NOW - 3600)
-    Beadview::Working.new(id: id, title: title, assignee: assignee, since: since)
+  def working(id, title: "t", assignee: "a-claude", since: NOW - 3600, prs: [])
+    Beadview::Working.new(id: id, title: title, assignee: assignee, since: since, prs: prs)
   end
 
-  def closed(id, closer: "a-codex", guessed: false, reason: nil, at: NOW - 7200)
-    Beadview::Closed.new(id: id, title: "t", closed_at: at, reason: reason, closer: closer, guessed: guessed)
+  def closed(id, closer: "a-codex", guessed: false, reason: nil, at: NOW - 7200, prs: [])
+    Beadview::Closed.new(id: id, title: "t", closed_at: at, reason: reason, closer: closer, guessed: guessed, prs: prs)
   end
 
   def text(views, days: 3) = Beadview::Render.text(views: views, now: NOW, days: days)
@@ -91,7 +92,53 @@ class RenderTest < Minitest::Test
   def test_empty_section_shows_nashi
     out = text([view(ready_count: 0)])
 
-    assert_equal 2, out.scan("（なし）").size
+    assert_equal 3, out.scan("（なし）").size
+  end
+
+  def pr(number, state) = Beadview::PullRequest.new(number: number, state: state)
+
+  def test_working_row_ends_with_pr_states_and_flags_forgotten_close
+    out = text([view(working: [working("tw-1", prs: [pr(261, :merged), pr(254, :closed)]),
+                               working("tw-2", prs: [pr(247, :draft)])])])
+
+    assert_match(/前から  閉じ忘れ\? #261 merged · #254 closed$/, out.lines.find { _1.include?("tw-1") }.chomp)
+    assert_match(/から  #247 draft$/, out.lines.find { _1.include?("tw-2") }.chomp)
+  end
+
+  def test_awaiting_section_sits_between_working_and_closed
+    out = text([view(awaiting: [closed("tw-9", prs: [pr(261, :merged), pr(247, :open)])])])
+    heads = out.lines.grep(/\A── /).map(&:chomp)
+    row = out.lines.find { _1.include?("tw-9") }.chomp
+
+    assert_equal ["── 着手中 ", "── マージ待ち（閉じたが PR が開いている）", "── 最近閉じたもの（3日以内）"],
+                 heads.first(3).map { _1.sub(/─+\z/, "") }
+    assert_match(/\Ateam_wiki\s+tw-9\s+t\s+#247 open$/, row, "片付いた PR は出さない")
+  end
+
+  def test_closed_row_shows_prs_after_closer
+    out = text([view(closed: [closed("tw-2", closer: "y-codex", prs: [pr(67, :merged)])])])
+
+    assert_match(/y-codex  #67 merged$/, out.lines.find { _1.include?("tw-2") }.chomp)
+  end
+
+  def test_pr_error_listed_without_hiding_repo
+    out = text([view(ready_count: 2, pr_error: "gh が見つかりません")])
+
+    assert_includes out, "team_wiki 2件"
+    assert_includes out, "── PR の状態を取れなかったリポジトリ "
+    assert_includes out, "team_wiki: gh が見つかりません"
+  end
+
+  def test_json_has_prs_stale_and_awaiting
+    views = [view(working: [working("tw-1", prs: [pr(261, :merged)])],
+                  awaiting: [closed("tw-9", prs: [pr(247, :open)])], pr_error: "x")]
+    repo = JSON.parse(Beadview::Render.json(views: views, now: NOW, days: 3))["repos"][0]
+
+    assert_equal [{ "number" => 261, "state" => "merged" }], repo["working"][0]["prs"]
+    assert_equal true, repo["working"][0]["stale"]
+    assert_equal "tw-9", repo["awaiting"][0]["id"]
+    assert_equal "open", repo["awaiting"][0]["prs"][0]["state"]
+    assert_equal "x", repo["pr_error"]
   end
 
   def test_error_repo_listed_and_excluded_from_ready
