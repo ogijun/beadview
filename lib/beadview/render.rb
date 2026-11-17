@@ -14,15 +14,16 @@ module Beadview
 
     module_function
 
-    def text(views:, now:, days:)
+    # pr: false のときは PR を調べていないので、「マージ待ち（なし）」と言い切らずに区分ごと出さない
+    def text(views:, now:, days:, pr: true)
       ok = views.reject(&:error)
       failed = views.select(&:error)
       sections = [
         [heading("── 着手中 "), working_lines(ok, now)],
-        [heading("── マージ待ち（閉じたが PR が開いている）"), awaiting_lines(ok)],
+        ([heading("── マージ待ち（閉じたが PR が開いている）"), awaiting_lines(ok)] if pr),
         [heading("── 最近閉じたもの（#{days}日以内）"), closed_lines(ok, now)],
         [heading("── 着手できるもの "), ready_lines(ok)]
-      ]
+      ].compact
       sections << [heading("── 読み込めなかったリポジトリ "), failed.map { "#{_1.repo.name}: #{_1.error}" }] if failed.any?
       pr_failed = ok.select(&:pr_error)
       sections << [heading("── PR の状態を取れなかったリポジトリ "), pr_failed.map { "#{_1.repo.name}: #{_1.pr_error}" }] if pr_failed.any?
