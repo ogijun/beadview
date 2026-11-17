@@ -6,7 +6,8 @@ module Beadview
   Working = Data.define(:id, :title, :assignee, :since, :prs) do
     def initialize(prs: [], **) = super
 
-    # 書かれた PR がすべて片付き、1つはマージされている。作業は終わっていて、閉じ忘れの疑いがある
+    # 書かれた番号がすべて片付いた PR で、1つはマージされている。作業は終わっていて、閉じ忘れの疑いがある。
+    # 「#40 の続き」のように別件の PR を書いただけでも当たるので、表示は「?」付きにする
     def stale? = prs.any? && prs.all?(&:finished?) && prs.any? { _1.state == :merged }
   end
 

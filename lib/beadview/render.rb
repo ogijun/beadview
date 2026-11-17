@@ -74,7 +74,7 @@ module Beadview
     end
 
     def prs_label(prs)
-      prs.map { "##{_1.number} #{_1.state}" }.join(" · ")
+      prs.select(&:known?).map { "##{_1.number} #{_1.state}" }.join(" · ")
     end
 
     def closed_lines(views, now)

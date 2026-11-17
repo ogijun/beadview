@@ -115,6 +115,12 @@ class RenderTest < Minitest::Test
     assert_match(/\Ateam_wiki\s+tw-9\s+t\s+#247 open$/, row, "片付いた PR は出さない")
   end
 
+  def test_unknown_prs_are_not_printed
+    out = text([view(working: [working("tw-1", prs: [pr(3, :unknown), pr(27, :open)])])])
+
+    assert_match(/から  #27 open$/, out.lines.find { _1.include?("tw-1") }.chomp)
+  end
+
   def test_closed_row_shows_prs_after_closer
     out = text([view(closed: [closed("tw-2", closer: "y-codex", prs: [pr(67, :merged)])])])
 

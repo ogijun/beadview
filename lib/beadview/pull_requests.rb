@@ -5,18 +5,20 @@ require "json"
 module Beadview
   class GhError < StandardError; end
 
-  # state は :open / :draft / :merged / :closed（マージされずに閉じた）
+  # state は :open / :draft / :merged / :closed（マージされずに閉じた）/ :unknown（PR として見つからない）。
+  # unknown は片付いたとも開いているとも言えないので、どちらの判定にも数えない
   PullRequest = Data.define(:number, :state) do
     def finished? = %i[merged closed].include?(state)
-    def pending? = !finished?
+    def pending? = %i[open draft].include?(state)
+    def known? = state != :unknown
   end
 
   # bead の文面に書かれた「#123」を、そのリポジトリの PR として読む
   module PullRequests
     FIELDS = %w[title notes close_reason].freeze
-    # \b は「#254を」の「を」を単語の続きとみなすので使わない
-    REF = /(?<![\w#])#(\d+)(?!\d)/
-    SLUG = %r{github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?\z}
+    # 「PR#12」は拾い、「GH#2950」は拾わない。\b は「#254を」の「を」を単語の続きとみなすので使わない
+    REF = /(?:(?<![\w#])|(?<=PR)|(?<=pr))#(\d+)(?!\d)/
+    SLUG = %r{(?:\A|[@/])github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?\z}
 
     module_function
 
@@ -24,9 +26,8 @@ module Beadview
       FIELDS.flat_map { issue[_1].to_s.scan(REF).flatten }.map(&:to_i).uniq
     end
 
-    # 番号が PR として見つかったものだけ。issue 番号や古すぎる PR は黙って落とす
     def lookup(issue, known)
-      refs(issue).filter_map { known[_1] }
+      refs(issue).map { known.fetch(_1) { |n| PullRequest.new(number: n, state: :unknown) } }
     end
 
     def slug(url)

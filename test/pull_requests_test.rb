@@ -19,11 +19,23 @@ class PullRequestsTest < Minitest::Test
     assert_empty Beadview::PullRequests.refs({ "title" => "GH#2950 と abc#12", "notes" => nil })
   end
 
-  def test_lookup_keeps_only_known_numbers_in_ref_order
-    known = { 261 => PR.new(number: 261, state: :merged), 254 => PR.new(number: 254, state: :closed) }
-    issue = { "notes" => "#261 #999 #254" }
+  def test_refs_accept_pr_glued_to_hash
+    assert_equal [12, 13], Beadview::PullRequests.refs({ "title" => "PR#12 と pr#13" })
+  end
 
-    assert_equal [261, 254], Beadview::PullRequests.lookup(issue, known).map(&:number)
+  # 見つからない番号（issue、取得件数より古い PR）は unknown として残す。
+  # 「書かれた PR はすべて片付いた」と言い切る根拠にさせないため
+  def test_lookup_marks_missing_numbers_unknown
+    known = { 261 => PR.new(number: 261, state: :merged), 254 => PR.new(number: 254, state: :closed) }
+    prs = Beadview::PullRequests.lookup({ "notes" => "#261 #999 #254" }, known)
+
+    assert_equal [[261, :merged], [999, :unknown], [254, :closed]], prs.map { [_1.number, _1.state] }
+    refute_predicate prs[1], :finished?
+    refute_predicate prs[1], :pending?
+  end
+
+  def test_slug_needs_github_as_the_host
+    assert_nil Beadview::PullRequests.slug("https://notgithub.com/o/r")
   end
 
   def test_slug_from_remote_urls

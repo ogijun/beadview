@@ -91,6 +91,13 @@ class SnapshotTest < Minitest::Test
     refute_predicate by_id["none"], :stale?
   end
 
+  def test_unknown_pr_blocks_forgotten_close
+    issues = [{ "id" => "w", "title" => "t", "status" => "in_progress", "notes" => "#100 の続き。#620 はマージ済み" }]
+    view = build(issues: issues, prs: { 620 => pr(620, :merged) })
+
+    refute_predicate view.working.first, :stale?
+  end
+
   # 閉じた時期を問わず、PR がまだ開いているものを拾う
   def test_awaiting_lists_closed_beads_with_pending_pr
     issues = [
