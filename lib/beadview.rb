@@ -2,6 +2,7 @@
 
 require "json"
 require_relative "beadview/bd"
+require_relative "beadview/pull_requests"
 require_relative "beadview/repos"
 require_relative "beadview/timeline"
 require_relative "beadview/snapshot"
