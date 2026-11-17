@@ -102,6 +102,30 @@ class CLITest < Minitest::Test
     assert_includes out, "a: gh が見つかりません"
   end
 
+  # gh の返した形が想定外でも、beads の表示は止めない
+  def test_unexpected_gh_error_keeps_the_rest
+    gh = FakeGh.new
+    gh.define_singleton_method(:pulls) { |_path| nil.downcase }
+    code, out = run_cli(["--repo", "a"], gh: gh)
+
+    assert_equal 0, code
+    assert_match(/^a\s+tw-1/, out)
+    assert_match(/^a: .*downcase/, out)
+  end
+
+  def test_slow_gh_times_out
+    gh = FakeGh.new
+    gh.define_singleton_method(:pulls) { |_path| sleep 5 }
+    out = StringIO.new
+    started = Time.now
+    Beadview::CLI.run(["--repo", "a"], bd: fake_bd, gh: gh, gh_timeout: 0.1, repo_paths: @paths,
+                                       cache: Beadview::HistoryCache::NONE, now: NOW, out: out)
+
+    assert_operator Time.now - started, :<, 2
+    assert_match(/^a: gh が 0.1 秒で返りませんでした/, out.string)
+    assert_match(/^a\s+tw-1/, out.string)
+  end
+
   def test_no_pr_skips_gh
     gh = FakeGh.new
     _, out = run_cli(["--no-pr"], gh: gh)

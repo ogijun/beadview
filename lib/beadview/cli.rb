@@ -7,11 +7,12 @@ module Beadview
     BANNER = "beadview — beads の作業状況を一画面で見る（読み取り専用）"
     # リポジトリ1つが読めなくても、ほかの表示は止めない
     REPO_ERRORS = [BdError, JSON::ParserError, SystemCallError, ArgumentError].freeze
+    GH_TIMEOUT = 15
 
     module_function
 
-    def run(argv, bd: Bd.new, gh: Gh.new, repo_paths: nil, runner: Bd::DEFAULT_RUNNER, cache: HistoryCache.new, now: Time.now,
-            out: $stdout)
+    def run(argv, bd: Bd.new, gh: Gh.new, gh_timeout: GH_TIMEOUT, repo_paths: nil, runner: Bd::DEFAULT_RUNNER,
+            cache: HistoryCache.new, now: Time.now, out: $stdout)
       opts = parse(argv)
       return usage(out, opts[:help]) if opts[:help]
 
@@ -20,7 +21,9 @@ module Beadview
       paths = repo_paths || Repos.ghq_paths(runner: runner)
       repos = select_repos(Repos.from_paths(paths: paths), opts[:repos])
 
-      views = repos.map { |repo| Thread.new { view_for(repo, bd: bd, gh: gh, cache: cache, now: now, days: opts[:days]) } }.map(&:value)
+      views = repos.map do |repo|
+        Thread.new { view_for(repo, bd: bd, gh: gh, gh_timeout: gh_timeout, cache: cache, now: now, days: opts[:days]) }
+      end.map(&:value)
       out.write(opts[:json] ? Render.json(views: views, now: now, days: opts[:days]) + "\n" : Render.text(views: views, now: now, days: opts[:days], pr: !gh.nil?))
       views.any? && views.all?(&:error) ? 1 : 0
     rescue OptionParser::ParseError, UsageError => e
@@ -38,8 +41,8 @@ module Beadview
       repos.select { names.include?(_1.name) }
     end
 
-    def view_for(repo, bd:, gh:, cache:, now:, days:)
-      pulls = Thread.new { pulls_for(repo, gh) } # 通信待ちを bd の呼び出しと重ねる
+    def view_for(repo, bd:, gh:, gh_timeout:, cache:, now:, days:)
+      pulls = Thread.new { pulls_for(repo, gh, gh_timeout) } # 通信待ちを bd の呼び出しと重ねる。例外は中で捕まえる
       issues = bd.list_all(repo.path)
       since_by_id = issues.select { _1["status"] == "in_progress" }.to_h do |issue|
         [issue["id"], since_for(issue, repo: repo, bd: bd, cache: cache)]
@@ -52,12 +55,14 @@ module Beadview
       Snapshot.failed(repo: repo, message: e.message.lines.first.to_s.strip)
     end
 
-    # PR が取れなくても beads の表示は止めない
-    def pulls_for(repo, gh)
+    # PR は無くても困らない付け足しなので、何が起きても beads の表示は止めない
+    def pulls_for(repo, gh, timeout)
       return [{}, nil] unless gh
 
-      [gh.pulls(repo.path), nil]
-    rescue GhError, JSON::ParserError, SystemCallError => e
+      thread = Thread.new { [gh.pulls(repo.path), nil] }
+      thread.report_on_exception = false
+      thread.join(timeout) ? thread.value : [{}, "gh が #{timeout} 秒で返りませんでした"]
+    rescue StandardError => e
       [{}, e.message.lines.first.to_s.strip]
     end
 
