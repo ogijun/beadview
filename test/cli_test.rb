@@ -58,10 +58,56 @@ class CLITest < Minitest::Test
                events: events, failing: failing)
   end
 
-  def run_cli(argv = [], bd: fake_bd)
+  # pulls を呼んだリポジトリを記録する偽の gh。error を渡すと GhError を投げる
+  class FakeGh
+    attr_reader :calls
+
+    def initialize(prs: {}, error: nil)
+      @prs = prs
+      @error = error
+      @calls = Queue.new
+    end
+
+    def pulls(path)
+      @calls << path
+      raise Beadview::GhError, @error if @error
+
+      @prs
+    end
+  end
+
+  def run_cli(argv = [], bd: fake_bd, gh: FakeGh.new)
     out = StringIO.new
-    code = Beadview::CLI.run(argv, bd: bd, repo_paths: @paths, cache: Beadview::HistoryCache::NONE, now: NOW, out: out)
+    code = Beadview::CLI.run(argv, bd: bd, gh: gh, repo_paths: @paths, cache: Beadview::HistoryCache::NONE, now: NOW, out: out)
     [code, out.string]
+  end
+
+  def bd_with_notes(id, notes)
+    list = fixture_json("list_all.json").map { _1["id"] == id ? _1.merge("notes" => notes) : _1 }
+    fake_bd.tap { |bd| bd.define_singleton_method(:list_all) { |_path| list } }
+  end
+
+  def test_forgotten_close_is_flagged
+    gh = FakeGh.new(prs: { 261 => Beadview::PullRequest.new(number: 261, state: :merged) })
+    _, out = run_cli(["--repo", "a"], bd: bd_with_notes("tw-1", "PR #261 を作成。CI/マージ待ち"), gh: gh)
+
+    assert_match(/tw-1.*閉じ忘れ\? #261 merged$/, out)
+  end
+
+  def test_gh_failure_keeps_the_rest
+    code, out = run_cli(["--repo", "a"], gh: FakeGh.new(error: "gh が見つかりません"))
+
+    assert_equal 0, code
+    assert_match(/^a\s+tw-1/, out)
+    assert_includes out, "a: gh が見つかりません"
+  end
+
+  def test_no_pr_skips_gh
+    gh = FakeGh.new
+    _, out = run_cli(["--no-pr"], gh: gh)
+
+    assert_empty gh.calls
+    refute_includes out, "── マージ待ち"
   end
 
   def test_outputs_all_sections_for_two_repos
