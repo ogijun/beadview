@@ -14,15 +14,19 @@ module Beadview
 
     module_function
 
-    def text(views:, now:, days:)
+    # pr: false のときは PR を調べていないので、「マージ待ち（なし）」と言い切らずに区分ごと出さない
+    def text(views:, now:, days:, pr: true)
       ok = views.reject(&:error)
       failed = views.select(&:error)
       sections = [
         [heading("── 着手中 "), working_lines(ok, now)],
+        ([heading("── マージ待ち（閉じたが PR が開いている）"), awaiting_lines(ok)] if pr),
         [heading("── 最近閉じたもの（#{days}日以内）"), closed_lines(ok, now)],
         [heading("── 着手できるもの "), ready_lines(ok)]
-      ]
+      ].compact
       sections << [heading("── 読み込めなかったリポジトリ "), failed.map { "#{_1.repo.name}: #{_1.error}" }] if failed.any?
+      pr_failed = ok.select(&:pr_error)
+      sections << [heading("── PR の状態を取れなかったリポジトリ "), pr_failed.map { "#{_1.repo.name}: #{_1.pr_error}" }] if pr_failed.any?
       sections.map { |head, lines| [head, *(lines.empty? ? [NONE] : lines)].join("\n") }.join("\n\n") + "\n"
     end
 
@@ -53,15 +57,31 @@ module Beadview
 
     def working_lines(views, now)
       rows = views.flat_map do |v|
-        v.working.map { [v.repo.name, _1.id, truncate(_1.title.to_s, TITLE_WIDTH), _1.assignee || "?", _1.since ? ago(_1.since, now) : "—"] }
+        v.working.map do
+          [v.repo.name, _1.id, truncate(_1.title.to_s, TITLE_WIDTH), _1.assignee || "?", _1.since ? ago(_1.since, now) : "—",
+           [("閉じ忘れ?" if _1.stale?), prs_label(_1.prs)].compact.join(" ")]
+        end
       end
       table(rows)
+    end
+
+    # 片付いた PR は出さない。ここで見たいのは「どこで止まっているか」
+    def awaiting_lines(views)
+      rows = views.flat_map do |v|
+        v.awaiting.map { [v.repo.name, _1.id, truncate(_1.title.to_s, TITLE_WIDTH), prs_label(_1.prs.select(&:pending?))] }
+      end
+      table(rows)
+    end
+
+    def prs_label(prs)
+      prs.select(&:known?).map { "##{_1.number} #{_1.state}" }.join(" · ")
     end
 
     def closed_lines(views, now)
       items = views.flat_map { |v| v.closed.map { [v.repo.name, _1] } }.sort_by { |_, c| -c.closed_at.to_f }
       rows = items.map do |name, c|
-        ["#{c.closed_at.getlocal(now.utc_offset).strftime('%m/%d')} #{name}", c.id, truncate(c.title.to_s, TITLE_WIDTH), closer(c)]
+        ["#{c.closed_at.getlocal(now.utc_offset).strftime('%m/%d')} #{name}", c.id, truncate(c.title.to_s, TITLE_WIDTH), closer(c),
+         prs_label(c.prs)]
       end
       table(rows).zip(items).flat_map do |line, (_, c)|
         reason = c.reason.to_s.gsub(/\s*\R\s*/, " ").strip
@@ -79,14 +99,14 @@ module Beadview
       "#{item.closer}?"
     end
 
-    # 最後の列以外を表示幅でそろえる
+    # 最後の列以外を表示幅でそろえる。最後の列が空なら行末の空白は残さない
     def table(rows)
       return [] if rows.empty?
 
       widths = rows.transpose[0...-1].map { |col| col.map { width(_1) }.max }
       rows.map do |row|
         cells = row[0...-1].each_with_index.map { |cell, i| pad(cell, widths[i]) }
-        (cells << row.last).join("  ")
+        (cells << row.last).join("  ").rstrip
       end
     end
 
@@ -109,12 +129,21 @@ module Beadview
         "name" => view.repo.name,
         "error" => view.error,
         "ready_count" => view.ready_count,
-        "working" => view.working.map { { "id" => _1.id, "title" => _1.title, "assignee" => _1.assignee, "since" => _1.since&.iso8601 } },
-        "closed" => view.closed.map do
-          { "id" => _1.id, "title" => _1.title, "closed_at" => _1.closed_at.iso8601, "reason" => _1.reason,
-            "closer" => _1.closer, "guessed" => _1.guessed }
-        end
+        "pr_error" => view.pr_error,
+        "working" => view.working.map do
+          { "id" => _1.id, "title" => _1.title, "assignee" => _1.assignee, "since" => _1.since&.iso8601,
+            "prs" => prs_hash(_1.prs), "stale" => _1.stale? }
+        end,
+        "awaiting" => view.awaiting.map { closed_hash(_1) },
+        "closed" => view.closed.map { closed_hash(_1) }
       }
     end
+
+    def closed_hash(item)
+      { "id" => item.id, "title" => item.title, "closed_at" => item.closed_at.iso8601, "reason" => item.reason,
+        "closer" => item.closer, "guessed" => item.guessed, "prs" => prs_hash(item.prs) }
+    end
+
+    def prs_hash(prs) = prs.map { { "number" => _1.number, "state" => _1.state.to_s } }
   end
 end

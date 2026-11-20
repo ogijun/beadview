@@ -7,19 +7,24 @@ module Beadview
     BANNER = "beadview — beads の作業状況を一画面で見る（読み取り専用）"
     # リポジトリ1つが読めなくても、ほかの表示は止めない
     REPO_ERRORS = [BdError, JSON::ParserError, SystemCallError, ArgumentError].freeze
+    GH_TIMEOUT = 15
 
     module_function
 
-    def run(argv, bd: Bd.new, repo_paths: nil, runner: Bd::DEFAULT_RUNNER, cache: HistoryCache.new, now: Time.now, out: $stdout)
+    def run(argv, bd: Bd.new, gh: Gh.new, gh_timeout: GH_TIMEOUT, repo_paths: nil, runner: Bd::DEFAULT_RUNNER,
+            cache: HistoryCache.new, now: Time.now, out: $stdout)
       opts = parse(argv)
       return usage(out, opts[:help]) if opts[:help]
 
       cache = HistoryCache::NONE if opts[:no_cache]
+      gh = nil if opts[:no_pr]
       paths = repo_paths || Repos.ghq_paths(runner: runner)
       repos = select_repos(Repos.from_paths(paths: paths), opts[:repos])
 
-      views = repos.map { |repo| Thread.new { view_for(repo, bd: bd, cache: cache, now: now, days: opts[:days]) } }.map(&:value)
-      out.write(opts[:json] ? Render.json(views: views, now: now, days: opts[:days]) + "\n" : Render.text(views: views, now: now, days: opts[:days]))
+      views = repos.map do |repo|
+        Thread.new { view_for(repo, bd: bd, gh: gh, gh_timeout: gh_timeout, cache: cache, now: now, days: opts[:days]) }
+      end.map(&:value)
+      out.write(opts[:json] ? Render.json(views: views, now: now, days: opts[:days]) + "\n" : Render.text(views: views, now: now, days: opts[:days], pr: !gh.nil?))
       views.any? && views.all?(&:error) ? 1 : 0
     rescue OptionParser::ParseError, UsageError => e
       out.puts e.message
@@ -36,15 +41,29 @@ module Beadview
       repos.select { names.include?(_1.name) }
     end
 
-    def view_for(repo, bd:, cache:, now:, days:)
+    def view_for(repo, bd:, gh:, gh_timeout:, cache:, now:, days:)
+      pulls = Thread.new { pulls_for(repo, gh, gh_timeout) } # 通信待ちを bd の呼び出しと重ねる。例外は中で捕まえる
       issues = bd.list_all(repo.path)
       since_by_id = issues.select { _1["status"] == "in_progress" }.to_h do |issue|
         [issue["id"], since_for(issue, repo: repo, bd: bd, cache: cache)]
       end
+      prs, pr_error = pulls.value
       Snapshot.build(repo: repo, issues: issues, ready: bd.ready(repo.path), since_by_id: since_by_id,
-                     closers: Timeline.closers(events: bd.events(repo.path)), now: now, days: days)
+                     closers: Timeline.closers(events: bd.events(repo.path)), now: now, days: days,
+                     prs: prs, pr_error: pr_error)
     rescue *REPO_ERRORS => e
       Snapshot.failed(repo: repo, message: e.message.lines.first.to_s.strip)
+    end
+
+    # PR は無くても困らない付け足しなので、何が起きても beads の表示は止めない
+    def pulls_for(repo, gh, timeout)
+      return [{}, nil] unless gh
+
+      thread = Thread.new { [gh.pulls(repo.path), nil] }
+      thread.report_on_exception = false
+      thread.join(timeout) ? thread.value : [{}, "gh が #{timeout} 秒で返りませんでした"]
+    rescue StandardError => e
+      [{}, e.message.lines.first.to_s.strip]
     end
 
     # started_at は使わない。最初の着手時刻のまま残り、戻してから再着手しても更新されないため
@@ -55,13 +74,14 @@ module Beadview
     end
 
     def parse(argv)
-      opts = { days: 3, repos: [], json: false, no_cache: false, help: nil }
+      opts = { days: 3, repos: [], json: false, no_cache: false, no_pr: false, help: nil }
       parser = OptionParser.new do |o|
         o.banner = "#{BANNER}\n\nusage: beadview [options]"
         o.on("--days N", Integer, "最近閉じたものを何日さかのぼるか（既定 3）") { opts[:days] = _1 }
         o.on("--repo NAME", "リポジトリ名で絞る（複数可）") { opts[:repos] << _1 }
         o.on("--json", "JSON で出す") { opts[:json] = true }
         o.on("--no-cache", "bd history のキャッシュを使わない") { opts[:no_cache] = true }
+        o.on("--no-pr", "gh で PR の状態を引かない（オフラインのとき）") { opts[:no_pr] = true }
         o.on("-h", "--help", "このヘルプ") { opts[:help] = o.help }
       end
       parser.parse(argv)
